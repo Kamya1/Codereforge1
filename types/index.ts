@@ -1,5 +1,11 @@
 // Core types for CodeReforge
 
+export interface TestCase {
+  input: string;
+  expectedOutput: string;
+  description?: string;
+}
+
 export interface Challenge {
   id: string;
   title: string;
@@ -9,12 +15,26 @@ export interface Challenge {
   difficulty: 'easy' | 'medium' | 'hard';
   concepts: string[];
   expectedOutput?: string;
+  isUserSubmitted?: boolean; // Flag to indicate user-submitted code
+  hasBug?: boolean; // Whether AI detected a bug in the code
+  bugDescription?: string; // AI-generated description of the bug (if exists)
+  problemStatement?: string; // Problem statement for contest problems
+  testCases?: TestCase[]; // Test cases with input/output pairs
+}
+
+export interface VariableChange {
+  name: string;
+  previousValue: any;
+  currentValue: any;
+  type: 'created' | 'updated' | 'deleted';
 }
 
 export interface TraceStep {
   step: number;
   line: number;
+  codeLine?: string; // The actual code line being executed
   variables: Record<string, any>;
+  variableChanges?: VariableChange[]; // What changed in this step
   stack: StackFrame[];
   output: string[];
   condition?: string;

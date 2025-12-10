@@ -56,3 +56,88 @@ body {
   background: hsl(var(--background));
 }
 
+/* Fix for pre and code elements to use theme colors */
+pre, code {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+}
+
+/* Fix for form inputs to use theme colors */
+input, textarea, select {
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+}
+
+input::placeholder, textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+@keyframes slide-in-from-top {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-out-to-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+.animate-out {
+  animation: fade-out 0.15s ease-in;
+}
+
+.slide-in-from-top-full {
+  animation: slide-in-from-top 0.3s ease-out;
+}
+
+.slide-in-from-bottom-full {
+  animation: slide-in-from-bottom 0.3s ease-out;
+}
+
+.slide-out-to-right-full {
+  animation: slide-out-to-right 0.3s ease-in;
+}
+
+.fade-out-80 {
+  animation: fade-out 0.15s ease-in;
+}
+

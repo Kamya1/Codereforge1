@@ -1,32 +1,90 @@
-import type { TraceStep, StackFrame, ExecutionResult } from '@/types';
+import type { TraceStep, StackFrame, ExecutionResult, VariableChange } from '@/types';
 
 export class CodeTracer {
   private steps: TraceStep[] = [];
   private currentVariables: Record<string, any> = {};
+  private previousVariables: Record<string, any> = {};
   private stack: StackFrame[] = [];
   private output: string[] = [];
   private lineNumber: number = 0;
+  private codeLines: string[] = [];
 
-  constructor() {
+  constructor(codeLines?: string[]) {
+    this.codeLines = codeLines || [];
     this.reset();
   }
 
   reset() {
     this.steps = [];
     this.currentVariables = {};
+    this.previousVariables = {};
     this.stack = [];
     this.output = [];
     this.lineNumber = 0;
   }
 
-  addStep(line: number, variables: Record<string, any>, condition?: string, explanation?: string) {
+  setCodeLines(lines: string[]) {
+    this.codeLines = lines;
+  }
+
+  private getVariableChanges(): VariableChange[] {
+    const changes: VariableChange[] = [];
+    const allVarNames = new Set([
+      ...Object.keys(this.previousVariables),
+      ...Object.keys(this.currentVariables),
+    ]);
+
+    for (const varName of allVarNames) {
+      const prevValue = this.previousVariables[varName];
+      const currValue = this.currentVariables[varName];
+
+      if (prevValue === undefined && currValue !== undefined) {
+        changes.push({
+          name: varName,
+          previousValue: undefined,
+          currentValue: currValue,
+          type: 'created',
+        });
+      } else if (prevValue !== undefined && currValue === undefined) {
+        changes.push({
+          name: varName,
+          previousValue: prevValue,
+          currentValue: undefined,
+          type: 'deleted',
+        });
+      } else if (prevValue !== currValue) {
+        changes.push({
+          name: varName,
+          previousValue: prevValue,
+          currentValue: currValue,
+          type: 'updated',
+        });
+      }
+    }
+
+    return changes;
+  }
+
+  addStep(
+    line: number, 
+    variables: Record<string, any>, 
+    condition?: string, 
+    explanation?: string,
+    codeLine?: string
+  ) {
+    this.previousVariables = { ...this.currentVariables };
     this.lineNumber = line;
     this.currentVariables = { ...variables };
+    
+    const variableChanges = this.getVariableChanges();
+    const actualCodeLine = codeLine || (line > 0 && line <= this.codeLines.length ? this.codeLines[line - 1] : undefined);
     
     const step: TraceStep = {
       step: this.steps.length + 1,
       line,
+      codeLine: actualCodeLine,
       variables: { ...this.currentVariables },
+      variableChanges: variableChanges.length > 0 ? variableChanges : undefined,
       stack: [...this.stack],
       output: [...this.output],
       condition,
@@ -63,14 +121,40 @@ export class CodeTracer {
 
 // C++ execution tracer (simulated)
 // Since we can't execute C++ in the browser, we use static analysis to simulate execution
-export async function executeCpp(code: string): Promise<ExecutionResult> {
-  const tracer = new CodeTracer();
+export async function executeCpp(code: string, input?: string): Promise<ExecutionResult> {
+  const lines = code.split('\n');
+  const tracer = new CodeTracer(lines);
   const output: string[] = [];
   let error: string | undefined;
   const startTime = Date.now();
 
+  // Parse input into tokens for cin simulation
+  // Split by whitespace (spaces, tabs, newlines) to handle multiple values per line
+  const inputTokens = input ? input.trim().split(/\s+/).filter(token => token.length > 0) : [];
+  let inputIndex = 0;
+
+  // Helper function to evaluate arithmetic expressions
+  const evaluateExpression = (expr: string, vars: Record<string, any>): number | undefined => {
+    try {
+      // Replace variable names with their values
+      let evalExpr = expr;
+      Object.keys(vars).forEach(varName => {
+        const regex = new RegExp(`\\b${varName}\\b`, 'g');
+        evalExpr = evalExpr.replace(regex, String(vars[varName]));
+      });
+      
+      // Evaluate the expression (safe evaluation)
+      // Only allow numbers, operators, parentheses, and spaces
+      if (/^[0-9+\-*/().\s]+$/.test(evalExpr)) {
+        return eval(evalExpr);
+      }
+    } catch (e) {
+      return undefined;
+    }
+    return undefined;
+  };
+
   try {
-    const lines = code.split('\n');
     const variables: Record<string, any> = {};
     let i = 0;
     const maxIterations = 1000; // Prevent infinite loops
@@ -87,34 +171,111 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
         continue;
       }
       
-      // Detect variable declarations: int x = 5;
-      const intVarMatch = trimmed.match(/int\s+(\w+)\s*=\s*(\d+);/);
+      // Detect cin statements: cin >> x; or cin >> x >> y;
+      const cinMatch = trimmed.match(/cin\s*>>\s*(\w+)(?:\s*>>\s*(\w+))?;/);
+      if (cinMatch) {
+        const varName1 = cinMatch[1];
+        const varName2 = cinMatch[2];
+        
+        if (inputIndex < inputTokens.length) {
+          // Handle first variable
+          const inputValue1 = inputTokens[inputIndex];
+          const numValue1 = parseFloat(inputValue1);
+          variables[varName1] = isNaN(numValue1) ? inputValue1 : (numValue1 % 1 === 0 ? parseInt(inputValue1, 10) : numValue1);
+          inputIndex++;
+          
+          // Handle second variable if present
+          if (varName2 && inputIndex < inputTokens.length) {
+            const inputValue2 = inputTokens[inputIndex];
+            const numValue2 = parseFloat(inputValue2);
+            variables[varName2] = isNaN(numValue2) ? inputValue2 : (numValue2 % 1 === 0 ? parseInt(inputValue2, 10) : numValue2);
+            inputIndex++;
+            tracer.addStep(
+              i + 1,
+              { ...variables },
+              undefined,
+              `Read input into ${varName1} = ${variables[varName1]}, ${varName2} = ${variables[varName2]}`,
+              line
+            );
+          } else {
+            tracer.addStep(
+              i + 1,
+              { ...variables },
+              undefined,
+              `Read input into ${varName1} = ${variables[varName1]}`,
+              line
+            );
+          }
+        } else {
+          error = `Runtime error: No input available for cin >> ${varName1}`;
+          break;
+        }
+        i++;
+        continue;
+      }
+
+      // Detect variable declarations: int x = 5; or int x = (y-x)/2;
+      const intVarMatch = trimmed.match(/int\s+(\w+)\s*=\s*(.+?);/);
       if (intVarMatch) {
         const varName = intVarMatch[1];
-        const value = parseInt(intVarMatch[2], 10);
-        variables[varName] = value;
-        tracer.addStep(
-          i + 1,
-          { ...variables },
-          undefined,
-          `Line ${i + 1}: Variable ${varName} initialized to ${value}`
-        );
+        const expr = intVarMatch[2].trim();
+        const value = evaluateExpression(expr, variables);
+        if (value !== undefined) {
+          variables[varName] = Math.floor(value); // Integer division
+          tracer.addStep(
+            i + 1,
+            { ...variables },
+            undefined,
+            `Variable ${varName} initialized to ${variables[varName]}`,
+            line
+          );
+        } else {
+          // If can't evaluate, try simple number parsing
+          const numValue = parseFloat(expr);
+          if (!isNaN(numValue)) {
+            variables[varName] = numValue % 1 === 0 ? parseInt(expr, 10) : numValue;
+            tracer.addStep(
+              i + 1,
+              { ...variables },
+              undefined,
+              `Variable ${varName} initialized to ${variables[varName]}`,
+              line
+            );
+          }
+        }
         i++;
         continue;
       }
       
-      // Detect variable assignments: x = 10;
-      const assignMatch = trimmed.match(/(\w+)\s*=\s*(\d+);/);
-      if (assignMatch && variables.hasOwnProperty(assignMatch[1])) {
+      // Detect variable assignments: x = 10; or a = b - x + 1;
+      const assignMatch = trimmed.match(/(\w+)\s*=\s*(.+?);/);
+      if (assignMatch) {
         const varName = assignMatch[1];
-        const value = parseInt(assignMatch[2], 10);
-        variables[varName] = value;
-        tracer.addStep(
-          i + 1,
-          { ...variables },
-          undefined,
-          `Line ${i + 1}: Variable ${varName} assigned to ${value}`
-        );
+        const expr = assignMatch[2].trim();
+        const value = evaluateExpression(expr, variables);
+        if (value !== undefined) {
+          variables[varName] = Math.floor(value); // Integer division for C++
+          tracer.addStep(
+            i + 1,
+            { ...variables },
+            undefined,
+            `Variable ${varName} assigned to ${variables[varName]}`,
+            line
+          );
+        } else {
+          // Try simple number parsing
+          const numValue = parseFloat(expr);
+          if (!isNaN(numValue)) {
+            variables[varName] = numValue % 1 === 0 ? parseInt(expr, 10) : numValue;
+            tracer.addStep(
+              i + 1,
+              { ...variables },
+              undefined,
+              `Variable ${varName} assigned to ${variables[varName]}`,
+              line
+            );
+          }
+        }
         i++;
         continue;
       }
@@ -128,7 +289,8 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
           i + 1,
           { ...variables },
           undefined,
-          `Line ${i + 1}: Variable ${varName} incremented to ${variables[varName]}`
+          `Variable ${varName} incremented to ${variables[varName]}`,
+          line
         );
         i++;
         continue;
@@ -144,47 +306,88 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
           i + 1,
           { ...variables },
           undefined,
-          `Line ${i + 1}: Variable ${varName} += ${addVar}, now ${variables[varName]}`
+          `Variable ${varName} += ${addVar}, now ${variables[varName]}`,
+          line
         );
         i++;
         continue;
       }
       
-      // Detect while loops: while (i < 5) {
-      const whileMatch = trimmed.match(/while\s*\(\s*(\w+)\s*(<|<=|>|>=)\s*(\d+)\s*\)\s*\{/);
+      // Detect while loops: while (t--) { or while (i < 5) {
+      const whileMatch = trimmed.match(/while\s*\(([^)]+)\)\s*\{/);
       if (whileMatch) {
-        const varName = whileMatch[1];
-        const op = whileMatch[2];
-        const limit = parseInt(whileMatch[3], 10);
-        const currentValue = variables[varName] || 0;
+        const conditionStr = whileMatch[1].trim();
         
-        let condition = false;
-        if (op === '<') condition = currentValue < limit;
-        else if (op === '<=') condition = currentValue <= limit;
-        else if (op === '>') condition = currentValue > limit;
-        else if (op === '>=') condition = currentValue >= limit;
-        
-        if (!condition) {
-          // Skip to closing brace
-          let braceCount = 1;
-          i++;
-          while (i < lines.length && braceCount > 0) {
-            const nextLine = lines[i].trim();
-            if (nextLine.includes('{')) braceCount++;
-            if (nextLine.includes('}')) braceCount--;
+        // Handle while(t--) pattern - decrement happens before condition check
+        if (conditionStr.match(/^\w+--$/)) {
+          const varName = conditionStr.replace('--', '');
+          const currentValue = variables[varName] || 0;
+          
+          // Decrement first, then check if it was > 0 before decrement
+          if (currentValue > 0) {
+            variables[varName] = currentValue - 1;
+            tracer.addStep(
+              i + 1,
+              { ...variables },
+              `while (${varName}--)`,
+              `Loop condition true (was ${currentValue}), ${varName} decremented to ${variables[varName]}`,
+              line
+            );
             i++;
+            continue;
+          } else {
+            // Variable was 0 or less, condition is false, skip loop body
+            let braceCount = 1;
+            i++;
+            while (i < lines.length && braceCount > 0) {
+              const nextLine = lines[i].trim();
+              if (nextLine.includes('{')) braceCount++;
+              if (nextLine.includes('}')) braceCount--;
+              i++;
+            }
+            continue;
           }
-          continue;
         }
         
-        tracer.addStep(
-          i + 1,
-          { ...variables },
-          `while (${varName} ${op} ${limit})`,
-          `Line ${i + 1}: Loop condition true, ${varName} = ${currentValue}`
-        );
-        i++;
-        continue;
+        // Handle while (var op num) pattern
+        const simpleWhileMatch = conditionStr.match(/^\s*(\w+)\s*(<|<=|>|>=|!=|==)\s*(\d+)\s*$/);
+        if (simpleWhileMatch) {
+          const varName = simpleWhileMatch[1];
+          const op = simpleWhileMatch[2];
+          const limit = parseInt(simpleWhileMatch[3], 10);
+          const currentValue = variables[varName] || 0;
+          
+          let condition = false;
+          if (op === '<') condition = currentValue < limit;
+          else if (op === '<=') condition = currentValue <= limit;
+          else if (op === '>') condition = currentValue > limit;
+          else if (op === '>=') condition = currentValue >= limit;
+          else if (op === '!=') condition = currentValue !== limit;
+          else if (op === '==') condition = currentValue === limit;
+          
+          if (!condition) {
+            // Skip to closing brace
+            let braceCount = 1;
+            i++;
+            while (i < lines.length && braceCount > 0) {
+              const nextLine = lines[i].trim();
+              if (nextLine.includes('{')) braceCount++;
+              if (nextLine.includes('}')) braceCount--;
+              i++;
+            }
+            continue;
+          }
+          
+          tracer.addStep(
+            i + 1,
+            { ...variables },
+            `while (${varName} ${op} ${limit})`,
+            `Loop condition true, ${varName} = ${currentValue}`,
+            line
+          );
+          i++;
+          continue;
+        }
       }
       
       // Detect closing brace - check if we need to loop back
@@ -198,23 +401,40 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
           if (prevLine.includes('{')) braceCount--;
           if (braceCount === 0 && prevLine.includes('while')) {
             // Check loop condition again
-            const whileMatch = prevLine.match(/while\s*\(\s*(\w+)\s*(<|<=|>|>=)\s*(\d+)\s*\)/);
+            const whileMatch = prevLine.match(/while\s*\(([^)]+)\)/);
             if (whileMatch) {
-              const varName = whileMatch[1];
-              const op = whileMatch[2];
-              const limit = parseInt(whileMatch[3], 10);
-              const currentValue = variables[varName] || 0;
+              const conditionStr = whileMatch[1].trim();
               
-              let condition = false;
-              if (op === '<') condition = currentValue < limit;
-              else if (op === '<=') condition = currentValue <= limit;
-              else if (op === '>') condition = currentValue > limit;
-              else if (op === '>=') condition = currentValue >= limit;
-              
-              if (condition) {
-                // Loop back to while line
-                i = j;
-                continue;
+              // Handle while(t--)
+              if (conditionStr.match(/^\w+--$/)) {
+                const varName = conditionStr.replace('--', '');
+                const currentValue = variables[varName] || 0;
+                if (currentValue > 0) {
+                  i = j;
+                  continue;
+                }
+              } else {
+                // Handle while (var op num)
+                const simpleWhileMatch = conditionStr.match(/^\s*(\w+)\s*(<|<=|>|>=|!=|==)\s*(\d+)\s*$/);
+                if (simpleWhileMatch) {
+                  const varName = simpleWhileMatch[1];
+                  const op = simpleWhileMatch[2];
+                  const limit = parseInt(simpleWhileMatch[3], 10);
+                  const currentValue = variables[varName] || 0;
+                  
+                  let condition = false;
+                  if (op === '<') condition = currentValue < limit;
+                  else if (op === '<=') condition = currentValue <= limit;
+                  else if (op === '>') condition = currentValue > limit;
+                  else if (op === '>=') condition = currentValue >= limit;
+                  else if (op === '!=') condition = currentValue !== limit;
+                  else if (op === '==') condition = currentValue === limit;
+                  
+                  if (condition) {
+                    i = j;
+                    continue;
+                  }
+                }
               }
             }
           }
@@ -224,24 +444,46 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
         continue;
       }
       
-      // Detect cout statements: cout << "text" << var << endl;
+      // Detect cout statements: cout << a << " " << b << endl;
       if (trimmed.includes('cout')) {
         const coutMatch = trimmed.match(/cout\s*<<\s*([^;]+);/);
         if (coutMatch) {
-          let outputText = coutMatch[1];
-          // Replace variable names with their values
-          Object.keys(variables).forEach(varName => {
-            const regex = new RegExp(`\\b${varName}\\b`, 'g');
-            outputText = outputText.replace(regex, String(variables[varName]));
-          });
-          // Remove quotes and << operators for display
-          outputText = outputText.replace(/["']/g, '').replace(/\s*<<\s*/g, ' ').replace(/\s*endl\s*/g, '');
-          output.push(outputText.trim());
+          let outputParts: string[] = [];
+          const coutContent = coutMatch[1];
+          
+          // Split by << and process each part
+          const parts = coutContent.split('<<').map(p => p.trim());
+          
+          for (const part of parts) {
+            // Check if it's a variable
+            const varMatch = part.match(/^\w+$/);
+            if (varMatch && variables.hasOwnProperty(part)) {
+              outputParts.push(String(variables[part]));
+            } else if (part.match(/^["']/)) {
+              // String literal - remove quotes
+              outputParts.push(part.replace(/^["']|["']$/g, ''));
+            } else if (part === 'endl' || part === '\\n') {
+              // Skip endl, we'll join with space
+            } else {
+              // Try to evaluate as expression
+              const evalValue = evaluateExpression(part, variables);
+              if (evalValue !== undefined) {
+                outputParts.push(String(evalValue));
+              } else if (variables.hasOwnProperty(part)) {
+                outputParts.push(String(variables[part]));
+              }
+            }
+          }
+          
+          const outputText = outputParts.join(' ');
+          output.push(outputText);
+          tracer.addOutput(outputText);
           tracer.addStep(
             i + 1,
             { ...variables },
             undefined,
-            `Line ${i + 1}: Output: ${outputText.trim()}`
+            `Output: ${outputText}`,
+            line
           );
         }
         i++;
@@ -266,7 +508,8 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
             i + 1,
             { ...variables },
             undefined,
-            `Line ${i + 1}: Function ${funcName}(${arg}) called, result = ${fact}`
+            `Function ${funcName}(${arg}) called, result = ${fact}`,
+            line
           );
         }
         i++;
@@ -279,7 +522,7 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
 
     // Ensure at least one trace step
     if (tracer.getTrace().length === 0) {
-      tracer.addStep(1, { ...variables }, undefined, 'Code analyzed');
+      tracer.addStep(1, { ...variables }, undefined, 'Code analyzed', lines[0] || '');
     }
 
     return {
@@ -302,13 +545,18 @@ export async function executeCpp(code: string): Promise<ExecutionResult> {
 
 // JavaScript execution tracer
 // This uses a combination of execution and static analysis to create trace steps
-export async function executeJavaScript(code: string): Promise<ExecutionResult> {
-  const tracer = new CodeTracer();
+export async function executeJavaScript(code: string, input?: string): Promise<ExecutionResult> {
+  const lines = code.split('\n');
+  const tracer = new CodeTracer(lines);
   const output: string[] = [];
   let error: string | undefined;
   const startTime = Date.now();
 
   try {
+    // Parse input into lines for readline simulation
+    const inputLines = input ? input.trim().split('\n').map(line => line.trim()) : [];
+    let inputIndex = 0;
+
     // Create a sandboxed execution environment
     const capturedOutput: string[] = [];
     const capturedLog = (...args: any[]) => {
@@ -332,6 +580,16 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
       });
     };
 
+    // Create input reading function
+    const readInput = () => {
+      if (inputIndex < inputLines.length) {
+        const value = inputLines[inputIndex];
+        inputIndex++;
+        return value;
+      }
+      return '';
+    };
+
     // Wrap code to instrument it
     const lines = code.split('\n');
     const instrumentedCode = lines.map((line, idx) => {
@@ -339,6 +597,15 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
       const trimmed = line.trim();
       
       if (!trimmed || trimmed.startsWith('//')) return line;
+      
+      // Handle readline/prompt/input - replace with our input function
+      if (trimmed.includes('readline()') || trimmed.includes('prompt(') || trimmed.match(/readline\s*\(/)) {
+        const inputMatch = trimmed.match(/(\w+)\s*=\s*(?:readline\(\)|prompt\(\))/);
+        if (inputMatch) {
+          const varName = inputMatch[1];
+          return `const ${varName} = _readInput();\n; _captureState(${lineNum}, "Line ${lineNum}: Read input into ${varName}");`;
+        }
+      }
       
       // Instrument variable assignments
       if (/^(let|const|var)\s+\w+\s*=/.test(trimmed)) {
@@ -363,7 +630,7 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
 
     // Create execution context
     const wrappedCode = `
-      (function(_capturedLog, _captureState, _vars) {
+      (function(_capturedLog, _captureState, _vars, _readInput) {
         // Override console.log
         console.log = function(...args) {
           _capturedLog(...args);
@@ -384,12 +651,14 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
     func(
       capturedLog,
       (lineNum: number, explanation: string) => captureState(lineNum, explanation),
-      variableStore
+      variableStore,
+      readInput
     );
 
     // Convert trace points to trace steps
     tracePoints.forEach((point) => {
-      tracer.addStep(point.line, point.vars, undefined, point.explanation);
+      const codeLine = point.line > 0 && point.line <= lines.length ? lines[point.line - 1] : undefined;
+      tracer.addStep(point.line, point.vars, undefined, point.explanation, codeLine);
     });
 
     // If no trace steps, analyze code statically as fallback
@@ -437,7 +706,8 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
               lineNum,
               { ...vars },
               undefined,
-              `Line ${lineNum}: Variable ${varName} = ${JSON.stringify(value)}`
+              `Variable ${varName} = ${JSON.stringify(value)}`,
+              line
             );
           } catch (e) {
             // Skip
@@ -450,7 +720,8 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
             lineNum,
             { ...vars },
             undefined,
-            `Line ${lineNum}: Output logged`
+            `Output logged`,
+            line
           );
         }
       });
@@ -458,7 +729,7 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
 
     // Ensure at least one trace step
     if (tracer.getTrace().length === 0) {
-      tracer.addStep(1, {}, undefined, 'Code executed');
+      tracer.addStep(1, {}, undefined, 'Code executed', lines[0] || '');
     }
 
     return {
@@ -482,6 +753,9 @@ export async function executeJavaScript(code: string): Promise<ExecutionResult> 
 }
 
 // Compare user prediction with actual execution
+// Export Python executor (defined in separate file to avoid circular dependencies)
+export { executePython } from './python-tracer';
+
 export function findDiscrepancies(
   userTrace: TraceStep[],
   actualTrace: TraceStep[]

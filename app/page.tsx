@@ -8,12 +8,18 @@ import { MentorQuestions } from '@/components/visualization/MentorQuestions';
 import { ConceptCard } from '@/components/visualization/ConceptCard';
 import { TraceComparison } from '@/components/visualization/TraceComparison';
 import { ThinkingAnalysis } from '@/components/visualization/ThinkingAnalysis';
+import { TestCaseResults } from '@/components/visualization/TestCaseResults';
+import { TraceTable } from '@/components/trace/TraceTable';
+import { CodeSubmissionForm } from '@/components/code/CodeSubmissionForm';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Play, Lock, CheckCircle2 } from 'lucide-react';
-import { useState } from 'react';
+import { useToast } from '@/components/ui/use-toast';
+import { Play, Lock, CheckCircle2, Home as HomeIcon, BookOpen, Code } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import { useState, useEffect } from 'react';
 import type { Challenge } from '@/types';
 import { bugscppChallenges } from '@/lib/data/bugscpp-challenges';
+import { useKeyboardShortcuts, COMMON_SHORTCUTS } from '@/lib/utils/keyboard-shortcuts';
 
 // Sample challenges with actual bugs - C++ code
 // Includes real-world bugs from BugsCpp dataset: https://github.com/Suresoft-GLaDOS/bugscpp
@@ -142,6 +148,7 @@ export default function Home() {
     fixSubmitted,
     fixValidated,
     thinkingAnalysis,
+    completedChallenges,
     setChallenge,
     unlockExecution,
     setExecutionResult,
@@ -152,9 +159,25 @@ export default function Home() {
     addConceptLearned,
     setFixSubmitted,
     setFixValidated,
+    markChallengeComplete,
+    clearCurrentChallenge,
   } = useChallengeStore();
 
+  const { toast } = useToast();
   const [isExecuting, setIsExecuting] = useState(false);
+  const [mode, setMode] = useState<'challenges' | 'debug'>('challenges');
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts([
+    {
+      ...COMMON_SHORTCUTS.EXECUTE,
+      action: () => {
+        if (!isLocked && !isExecuting) {
+          handleExecute();
+        }
+      },
+    },
+  ]);
 
   const handleExecute = async () => {
     if (!challenge || isLocked) return;
@@ -163,11 +186,15 @@ export default function Home() {
     try {
       const code = challenge.code;
       const userTrace = prediction?.traceSteps || [];
+      // Use first test case input if available, otherwise no input
+      const input = challenge.testCases && challenge.testCases.length > 0 
+        ? challenge.testCases[0].input 
+        : undefined;
 
       const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, userTrace, language: challenge.language }),
+        body: JSON.stringify({ code, userTrace, language: challenge.language, input }),
       });
 
       const result = await response.json();
@@ -202,111 +229,105 @@ export default function Home() {
 
   const handleSubmitFix = async () => {
     if (!fixedCode || !challenge) {
-      alert('Please edit the code first before submitting.');
+      toast({
+        variant: 'warning',
+        title: 'Code Required',
+        description: 'Please edit the code first before submitting.',
+      });
       return;
     }
 
     // Check if code was actually changed
     if (fixedCode === challenge.code) {
-      alert('Please modify the code to fix the bug before submitting.');
+      toast({
+        variant: 'warning',
+        title: 'No Changes Detected',
+        description: 'Please modify the code to fix the bug before submitting.',
+      });
       return;
     }
 
     // Execute the fixed code to verify it works
     try {
+      // Use first test case input if available
+      const input = challenge.testCases && challenge.testCases.length > 0 
+        ? challenge.testCases[0].input 
+        : undefined;
+
       const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: fixedCode, language: challenge.language }),
+        body: JSON.stringify({ code: fixedCode, language: challenge.language, input }),
       });
 
       const result = await response.json();
       
       if (!result.success) {
-        alert(`Error: ${result.error || 'Code execution failed'}`);
+        toast({
+          variant: 'destructive',
+          title: 'Execution Error',
+          description: result.error || 'Code execution failed',
+        });
         return;
       }
 
-      // Validate the fix by checking if it actually fixes the bug
-      let isValidFix = false;
-      
-      if (challenge.id === '5') {
-        // Infinite loop challenge - check if count increments and loop terminates
-        const hasIncrement = fixedCode.includes('count++') || 
-                            fixedCode.includes('count = count + 1') ||
-                            fixedCode.includes('count += 1') ||
-                            fixedCode.includes('++count');
-        // Check if output shows count reaching 5 and loop terminates
-        const outputText = result.output.join(' ');
-        const hasFinalCount = outputText.includes('Final count: 5');
-        // Also check that we don't have infinite output (should have max 6 lines: 5 counts + final)
-        const outputLines = result.output.length;
-        isValidFix = hasIncrement && hasFinalCount && outputLines <= 6;
-      } else if (challenge.id === '1') {
-        // Factorial - check if it returns correct value (120 for factorial(5))
-        const outputText = result.output.join(' ');
-        isValidFix = outputText.includes('120');
-      } else if (challenge.id === '2') {
-        // Off-by-one - check if sum is correct (should be 10 for 0+1+2+3+4, not 15 for 0+1+2+3+4+5)
-        // The fix is to change "i <= 5" to "i < 5"
-        
-        // Check that the code was changed from <= to <
-        // Look for "i < 5" pattern (with optional whitespace)
-        const hasCorrectCondition = /i\s*<\s*5/.test(fixedCode);
-        // Make sure the buggy condition "i <= 5" is NOT present
-        const hasBuggyCondition = /i\s*<=\s*5/.test(fixedCode);
-        
-        // The fix is valid if:
-        // 1. Code has the correct condition (i < 5)
-        // 2. Code does NOT have the buggy condition (i <= 5)
-        // 3. Code actually changed from the original
-        const codeChanged = hasCorrectCondition && !hasBuggyCondition && fixedCode !== challenge.code;
-        
-        // Also try to validate output if available
-        const outputText = result.output.join(' ');
-        let sumValue = null;
-        const sumMatch = outputText.match(/sum[:\s]+(\d+)/i);
-        if (sumMatch) {
-          sumValue = parseInt(sumMatch[1], 10);
-        }
-        
-        // Primary validation: code change is correct
-        // Secondary: if output is available, check sum is 10 (not 15)
-        isValidFix = codeChanged && (sumValue === null || sumValue === 10);
-        
-        // Debug logging
-        if (!isValidFix) {
-          console.log('Challenge 2 validation failed:', {
-            hasCorrectCondition,
-            hasBuggyCondition,
-            codeChanged,
-            sumValue,
-            outputText: outputText.substring(0, 150),
-            fixedCodeSnippet: fixedCode.match(/while\s*\([^)]+\)/)?.[0] || 'not found'
+      // Use AI to validate the fix (no hardcoded logic)
+      try {
+        const validationResponse = await fetch('/api/validate-fix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challenge,
+            originalCode: challenge.code,
+            fixedCode,
+            executionResult: result,
+          }),
+        });
+
+        const validationData = await validationResponse.json();
+        const validation = validationData.validation;
+
+        setFixSubmitted(true);
+        setFixValidated(validation.isValid);
+
+        if (validation.isValid) {
+          // Mark challenge as complete
+          markChallengeComplete(challenge.id);
+          
+          // Add concept cards for learned concepts (determined by AI, only once)
+          if (!fixValidated) {
+            validation.conceptsLearned.forEach((concept: string) => {
+              addConceptLearned({
+                concept,
+                description: `You successfully understood and fixed the ${concept} concept!`,
+                learned: true,
+              });
+            });
+          }
+          toast({
+            variant: 'success',
+            title: 'Fix Validated Successfully! ✓',
+            description: validation.explanation,
+          });
+        } else {
+          const suggestionsText = validation.suggestions && validation.suggestions.length > 0
+            ? `\n\nSuggestions:\n${validation.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`
+            : '';
+          toast({
+            variant: 'warning',
+            title: 'Fix Needs Improvement',
+            description: `${validation.explanation}${suggestionsText}`,
           });
         }
-      } else if (challenge.id === '3') {
-        // Array reference - check if user understands references
-        // Accept if code changed meaningfully (not just whitespace)
-        const originalTrimmed = challenge.code.replace(/\s+/g, '');
-        const fixedTrimmed = fixedCode.replace(/\s+/g, '');
-        isValidFix = originalTrimmed !== fixedTrimmed && result.success;
-      } else if (challenge.id === '4') {
-        // Variable scope - accept if code changed meaningfully
-        const originalTrimmed = challenge.code.replace(/\s+/g, '');
-        const fixedTrimmed = fixedCode.replace(/\s+/g, '');
-        isValidFix = originalTrimmed !== fixedTrimmed && result.success;
-      } else {
-        // Default: accept if code changed and executes successfully
-        isValidFix = fixedCode !== challenge.code && result.success;
-      }
-
-      setFixSubmitted(true);
-      setFixValidated(isValidFix);
-
-      if (isValidFix) {
-        // Add concept cards for learned concepts (only once)
-        if (!fixValidated) {
+      } catch (validationError) {
+        console.error('AI validation error:', validationError);
+        // Fallback: basic validation
+        const basicValid = fixedCode !== challenge.code && result.success;
+        setFixSubmitted(true);
+        setFixValidated(basicValid);
+        
+        if (basicValid) {
+          markChallengeComplete(challenge.id);
           challenge.concepts.forEach((concept) => {
             addConceptLearned({
               concept,
@@ -314,71 +335,189 @@ export default function Home() {
               learned: true,
             });
           });
+          toast({
+            variant: 'success',
+            title: 'Fix Submitted Successfully! ✓',
+            description: 'AI validation unavailable, using basic validation',
+          });
+        } else {
+          toast({
+            variant: 'warning',
+            title: 'AI Validation Unavailable',
+            description: 'Please ensure your API key is configured for AI-powered validation.',
+          });
         }
-        alert('✓ Fix submitted successfully! The bug has been fixed. Check the concept cards below.');
-      } else {
-        alert('⚠ The code executes, but the bug may not be fully fixed. Review your solution and try again.');
       }
     } catch (error) {
       console.error('Fix submission error:', error);
-      alert('Failed to submit fix. Please try again.');
+      toast({
+        variant: 'destructive',
+        title: 'Submission Failed',
+        description: 'Failed to submit fix. Please try again.',
+      });
     }
   };
 
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-6 space-y-6">
-        <div className="text-center space-y-2 mb-8">
-          <h1 className="text-4xl font-bold">CodeReforge</h1>
-          <p className="text-muted-foreground">
-            Rebuild Your Logic — Think Before You Run
-          </p>
+        <div className="flex justify-between items-center mb-8">
+          <div className="text-center flex-1">
+            <h1 className="text-4xl font-bold">CodeReforge</h1>
+            <p className="text-muted-foreground">
+              Rebuild Your Logic — Think Before You Run
+            </p>
+          </div>
+          <ThemeToggle />
         </div>
 
         {!challenge ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Select a Challenge</CardTitle>
-              <CardDescription>
-                Choose a buggy code snippet to analyze and fix
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
-                {sampleChallenges.map((ch) => (
+          <div className="space-y-6">
+            {/* Mode Selection */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Choose Your Mode</CardTitle>
+                <CardDescription>
+                  Select how you want to practice debugging and understanding code
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
                   <Card
-                    key={ch.id}
-                    className="cursor-pointer hover:border-primary transition-colors"
-                    onClick={() => handleChallengeSelect(ch)}
+                    className={`cursor-pointer transition-all ${
+                      mode === 'challenges'
+                        ? 'border-primary border-2 shadow-lg'
+                        : 'hover:border-primary'
+                    }`}
+                    onClick={() => setMode('challenges')}
                   >
                     <CardHeader>
-                      <CardTitle className="text-lg">{ch.title}</CardTitle>
-                      <CardDescription>{ch.description}</CardDescription>
+                      <CardTitle className="flex items-center gap-2">
+                        <BookOpen className="w-5 h-5" />
+                        Try Challenges
+                      </CardTitle>
+                      <CardDescription>
+                        Practice with pre-saved buggy code snippets
+                      </CardDescription>
                     </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-1">
-                        {ch.concepts.map((concept) => (
-                          <span
-                            key={concept}
-                            className="text-xs bg-muted px-2 py-1 rounded"
-                          >
-                            {concept}
-                          </span>
-                        ))}
-                      </div>
-                    </CardContent>
                   </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                  <Card
+                    className={`cursor-pointer transition-all ${
+                      mode === 'debug'
+                        ? 'border-primary border-2 shadow-lg'
+                        : 'hover:border-primary'
+                    }`}
+                    onClick={() => setMode('debug')}
+                  >
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Code className="w-5 h-5" />
+                        Debug My Code
+                      </CardTitle>
+                      <CardDescription>
+                        Paste your own code and debug it step-by-step
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Content based on mode */}
+            {mode === 'challenges' ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select a Challenge</CardTitle>
+                  <CardDescription>
+                    Choose a buggy code snippet to analyze and fix
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    {sampleChallenges.map((ch) => (
+                      <Card
+                        key={ch.id}
+                        className="cursor-pointer hover:border-primary transition-colors"
+                        onClick={() => handleChallengeSelect(ch)}
+                      >
+                        <CardHeader>
+                          <CardTitle className="text-lg">{ch.title}</CardTitle>
+                          <CardDescription>{ch.description}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex flex-wrap gap-1">
+                            {ch.concepts.map((concept) => (
+                              <span
+                                key={concept}
+                                className="text-xs bg-muted px-2 py-1 rounded"
+                              >
+                                {concept}
+                              </span>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <CodeSubmissionForm />
+            )}
+          </div>
         ) : (
           <div className="max-w-6xl mx-auto space-y-6">
+            {/* Back to Home Button */}
+            <div className="flex justify-start">
+              <Button
+                onClick={clearCurrentChallenge}
+                variant="outline"
+                className="mb-4"
+              >
+                <HomeIcon className="w-4 h-4 mr-2" />
+                Back to Challenge List
+              </Button>
+            </div>
+            
             {/* Challenge Header */}
             <Card>
               <CardHeader>
-                <CardTitle>{challenge.title}</CardTitle>
-                <CardDescription>{challenge.description}</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  {challenge.isUserSubmitted && (
+                    <Code className="w-5 h-5 text-primary" />
+                  )}
+                  {challenge.title}
+                </CardTitle>
+                <CardDescription className="space-y-2">
+                  {challenge.problemStatement && (
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-1">Problem Statement:</p>
+                      <p className="text-sm text-blue-800 dark:text-blue-200 whitespace-pre-wrap">{challenge.problemStatement}</p>
+                    </div>
+                  )}
+                  <div>{challenge.description}</div>
+                  {challenge.testCases && challenge.testCases.length > 0 && (
+                    <div className="mt-2 p-2 bg-muted rounded">
+                      <p className="text-xs font-medium mb-1">Test Cases Available: {challenge.testCases.length}</p>
+                      {challenge.testCases.slice(0, 2).map((tc, idx) => (
+                        <div key={idx} className="text-xs text-muted-foreground mt-1">
+                          <span className="font-mono">Input: {tc.input.substring(0, 50)}{tc.input.length > 50 ? '...' : ''}</span>
+                          <span className="ml-2 font-mono">Expected: {tc.expectedOutput.substring(0, 50)}{tc.expectedOutput.length > 50 ? '...' : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {challenge.isUserSubmitted && challenge.hasBug && challenge.bugDescription && (
+                    <span className="block mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/20 rounded text-yellow-900 dark:text-yellow-100">
+                      <strong>Bug Detected:</strong> {challenge.bugDescription}
+                    </span>
+                  )}
+                  {challenge.isUserSubmitted && challenge.hasBug === false && (
+                    <span className="block mt-2 p-2 bg-green-100 dark:bg-green-900/20 rounded text-green-900 dark:text-green-100">
+                      <strong>No bugs found!</strong> Trace through the code to understand its logic.
+                    </span>
+                  )}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <CodeEditor readOnly={true} height="250px" />
@@ -396,7 +535,9 @@ export default function Home() {
                     Step 1: Predict Before You Run
                   </CardTitle>
                   <CardDescription>
-                    Describe what the code does and trace its execution manually. You must complete this step before proceeding.
+                    {challenge.isUserSubmitted && challenge.hasBug === false
+                      ? 'Trace through your code step-by-step to understand its logic and execution flow.'
+                      : 'Describe what the code does and trace its execution manually. You must complete this step before proceeding.'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -468,14 +609,28 @@ export default function Home() {
                     {executionResult && (
                       <div className="space-y-4">
                         <ExecutionVisualization />
+                        {challenge.testCases && challenge.testCases.length > 0 && (
+                          <TestCaseResults />
+                        )}
+                        {/* Show user's trace if available */}
+                        {prediction?.traceSteps && prediction.traceSteps.length > 0 && (
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Your Predicted Trace</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <TraceTable trace={prediction.traceSteps} isUserTrace={true} />
+                            </CardContent>
+                          </Card>
+                        )}
                         <MentorQuestions />
                       </div>
                     )}
                   </CardContent>
                 </Card>
 
-                {/* Step 3: Fix the Forge - Only show after Step 2 is complete */}
-                {executionResult && (
+                {/* Step 3: Fix the Forge - Only show after Step 2 is complete and if bug exists */}
+                {executionResult && challenge.hasBug !== false && (
                   <Card className="border-primary">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
@@ -485,7 +640,9 @@ export default function Home() {
                         Step 3: Fix the Forge
                       </CardTitle>
                       <CardDescription>
-                        Edit the code to fix the bug
+                        {challenge.isUserSubmitted && challenge.bugDescription
+                          ? `Edit the code to fix: ${challenge.bugDescription}`
+                          : 'Edit the code to fix the bug'}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -518,8 +675,28 @@ export default function Home() {
                   </Card>
                 )}
 
-                {/* Show comparison and concepts after fix is submitted */}
-                {fixSubmitted && executionResult && (
+                {/* For user-submitted code without bugs, show completion message */}
+                {executionResult && challenge.isUserSubmitted && challenge.hasBug === false && (
+                  <Card className="border-green-500 bg-green-50/50 dark:bg-green-900/10">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                        <CheckCircle2 className="w-5 h-5" />
+                        Code Analysis Complete
+                      </CardTitle>
+                      <CardDescription>
+                        You've successfully traced through your code and understood its logic!
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground">
+                        Your code has no bugs. You've completed the trace and understand how it works. Great job!
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Show comparison and concepts after fix is submitted OR after tracing user code without bugs */}
+                {((fixSubmitted && executionResult) || (challenge.isUserSubmitted && challenge.hasBug === false && executionResult)) && (
                   <div className="space-y-4">
                     <TraceComparison />
                     <ConceptCard />

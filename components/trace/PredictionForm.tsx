@@ -10,6 +10,7 @@ export function PredictionForm() {
   const [description, setDescription] = useState('');
   const [expectedOutput, setExpectedOutput] = useState('');
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [currentStep, setCurrentStep] = useState({
     line: 1,
     variables: {} as Record<string, any>,
@@ -52,6 +53,7 @@ export function PredictionForm() {
     
     // Analyze user thinking with AI
     if (challenge) {
+      setIsAnalyzing(true);
       try {
         const response = await fetch('/api/analyze-thinking', {
           method: 'POST',
@@ -70,6 +72,8 @@ export function PredictionForm() {
       } catch (error) {
         console.error('Error analyzing thinking:', error);
         // Continue even if analysis fails
+      } finally {
+        setIsAnalyzing(false);
       }
     }
     
@@ -111,11 +115,11 @@ export function PredictionForm() {
   return (
     <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium mb-2">
+          <label className="block text-sm font-medium mb-2 text-foreground">
             What does this code do?
           </label>
           <textarea
-            className="w-full p-2 border rounded-md min-h-[80px]"
+            className="w-full p-2 border border-input rounded-md min-h-[80px] bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Describe the code's purpose..."
@@ -123,11 +127,11 @@ export function PredictionForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2">
+          <label className="block text-sm font-medium mb-2 text-foreground">
             Expected Output
           </label>
           <textarea
-            className="w-full p-2 border rounded-md min-h-[60px]"
+            className="w-full p-2 border border-input rounded-md min-h-[60px] bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             value={expectedOutput}
             onChange={(e) => setExpectedOutput(e.target.value)}
             placeholder="What output do you expect?"
@@ -135,14 +139,14 @@ export function PredictionForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2">
+          <label className="block text-sm font-medium mb-2 text-foreground">
             Manual Trace Steps
           </label>
-          <div className="space-y-2 border p-4 rounded-md">
+          <div className="space-y-2 border border-border p-4 rounded-md bg-card">
             <div className="flex gap-2 mb-2">
               <input
                 type="number"
-                className="w-20 p-1 border rounded"
+                className="w-20 p-1 border border-input rounded bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder="Line"
                 value={currentStep.line}
                 onChange={(e) => setCurrentStep({ ...currentStep, line: parseInt(e.target.value) || 1 })}
@@ -159,19 +163,19 @@ export function PredictionForm() {
             </div>
 
             {Object.keys(currentStep.variables).length > 0 && (
-              <div className="text-xs bg-muted p-2 rounded">
+              <div className="text-xs bg-muted text-foreground p-2 rounded">
                 Variables: {JSON.stringify(currentStep.variables, null, 2)}
               </div>
             )}
 
             {currentStep.output.length > 0 && (
-              <div className="text-xs bg-muted p-2 rounded">
+              <div className="text-xs bg-muted text-foreground p-2 rounded">
                 Output: {currentStep.output.join(', ')}
               </div>
             )}
 
             <textarea
-              className="w-full p-2 border rounded-md text-sm"
+              className="w-full p-2 border border-input rounded-md text-sm bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="Explanation for this step..."
               value={currentStep.explanation}
               onChange={(e) => setCurrentStep({ ...currentStep, explanation: e.target.value })}
@@ -182,7 +186,7 @@ export function PredictionForm() {
             <div className="mt-4 space-y-2">
               <p className="text-sm font-medium">Your Trace Steps:</p>
               {traceSteps.map((step, idx) => (
-                <div key={idx} className="text-xs bg-muted p-2 rounded">
+                <div key={idx} className="text-xs bg-muted text-foreground p-2 rounded">
                   Step {step.step} (Line {step.line}): {JSON.stringify(step.variables)}
                 </div>
               ))}
@@ -192,12 +196,21 @@ export function PredictionForm() {
 
         <Button
           onClick={handleSubmit}
-          disabled={!description || !expectedOutput}
+          disabled={!description || !expectedOutput || isAnalyzing}
           className="w-full"
         >
-          Submit Prediction & Unlock Execution
+          {isAnalyzing ? (
+            <>Analyzing Your Thinking with AI...</>
+          ) : (
+            <>Submit Prediction & Unlock Execution</>
+          )}
         </Button>
-        {(!description || !expectedOutput) && (
+        {isAnalyzing && (
+          <p className="text-xs text-primary text-center animate-pulse">
+            🤖 AI is analyzing your prediction... This will appear below once complete.
+          </p>
+        )}
+        {(!description || !expectedOutput) && !isAnalyzing && (
           <p className="text-xs text-muted-foreground text-center">
             Please fill in description and expected output to submit
           </p>

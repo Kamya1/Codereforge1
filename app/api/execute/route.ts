@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { executeJavaScript, executeCpp } from '@/lib/execution/tracer';
+import { executeJavaScript, executeCpp, executePython } from '@/lib/execution/tracer';
 import { findDiscrepancies } from '@/lib/execution/tracer';
 import type { TraceStep } from '@/types';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { code, userTrace, language } = body;
+    const { code, userTrace, language, input } = body;
 
     if (!code) {
       return NextResponse.json(
@@ -15,10 +15,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Execute the code based on language
-    const executionResult = language === 'cpp' 
-      ? await executeCpp(code)
-      : await executeJavaScript(code);
+    // Execute the code based on language with optional input
+    let executionResult;
+    if (language === 'cpp') {
+      executionResult = await executeCpp(code, input);
+    } else if (language === 'python') {
+      executionResult = await executePython(code, input);
+    } else {
+      executionResult = await executeJavaScript(code, input);
+    }
 
     // Find discrepancies if user trace is provided
     let discrepancies: any[] = [];

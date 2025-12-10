@@ -28,12 +28,15 @@ export function ThinkingAnalysis() {
   const QualityIcon = qualityIcons[thinkingAnalysis.reasoningQuality];
 
   return (
-    <Card className="border-primary">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Brain className="w-5 h-5 text-primary" />
-          AI Analysis of Your Thinking
+    <Card className="border-primary border-2 shadow-lg">
+      <CardHeader className="bg-primary/5">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Brain className="w-6 h-6 text-primary" />
+          🤖 AI Analysis of Your Thinking
         </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          This analysis was generated using AI when you submitted your prediction
+        </p>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Reasoning Quality */}

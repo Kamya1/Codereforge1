@@ -1,5 +1,8 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ChallengeState, Challenge, Prediction, ExecutionResult, Discrepancy, MentorQuestion, ConceptCard, ThinkingAnalysis } from '@/types';
+import type { UserScore } from '@/lib/gamification/points-system';
+import type { UserProgress } from '@/lib/learning/adaptive-engine';
 
 interface ChallengeStore extends ChallengeState {
   // Actions
@@ -17,9 +20,27 @@ interface ChallengeStore extends ChallengeState {
   setFixSubmitted: (submitted: boolean) => void;
   setFixValidated: (validated: boolean) => void;
   reset: () => void;
+  clearCurrentChallenge: () => void;
+  // Progress tracking
+  completedChallenges: string[];
+  markChallengeComplete: (challengeId: string) => void;
+  // Gamification
+  userScore: UserScore;
+  updateScore: (points: number, eventType: string) => void;
+  // Adaptive learning
+  userProgress: UserProgress;
+  updateProgress: (challengeId: string, correct: boolean, timeSpent: number, conceptsLearned: string[]) => void;
 }
 
-const initialState: ChallengeState = {
+import { createInitialScore } from '@/lib/gamification/points-system';
+import { updateScore, calculatePointsForEvent } from '@/lib/gamification/points-system';
+import { updateProgress as updateUserProgress } from '@/lib/learning/adaptive-engine';
+
+const initialState: ChallengeState & { 
+  completedChallenges: string[];
+  userScore: UserScore;
+  userProgress: UserProgress;
+} = {
   challenge: null,
   prediction: null,
   executionResult: null,
@@ -32,10 +53,22 @@ const initialState: ChallengeState = {
   conceptsLearned: [],
   fixSubmitted: false,
   fixValidated: false,
+  completedChallenges: [],
+  userScore: createInitialScore(),
+  userProgress: {
+    challengesCompleted: [],
+    conceptsMastered: [],
+    accuracy: 0,
+    averageTime: 0,
+    attemptsPerChallenge: {},
+    lastDifficulty: 'easy',
+  },
 };
 
-export const useChallengeStore = create<ChallengeStore>((set) => ({
-  ...initialState,
+export const useChallengeStore = create<ChallengeStore>()(
+  persist(
+    (set) => ({
+      ...initialState,
   
   setChallenge: (challenge) => set({ 
     challenge, 
@@ -85,6 +118,70 @@ export const useChallengeStore = create<ChallengeStore>((set) => ({
   
   setFixValidated: (fixValidated) => set({ fixValidated }),
   
+  markChallengeComplete: (challengeId: string) => set((state) => {
+    if (!state.completedChallenges.includes(challengeId)) {
+      const newScore = updateScore(state.userScore, {
+        type: 'challenge_complete',
+        points: calculatePointsForEvent('challenge_complete', state.userScore.streak),
+        description: 'Completed challenge',
+      });
+      
+      return {
+        completedChallenges: [...state.completedChallenges, challengeId],
+        userScore: {
+          ...newScore,
+          challengesCompleted: newScore.challengesCompleted + 1,
+        },
+      };
+    }
+    return state;
+  }),
+  
+  updateScore: (points: number, eventType: string) => set((state) => {
+    const event: any = {
+      type: eventType,
+      points,
+      description: `${eventType} event`,
+    };
+    return {
+      userScore: updateScore(state.userScore, event),
+    };
+  }),
+  
+  updateProgress: (challengeId: string, correct: boolean, timeSpent: number, conceptsLearned: string[]) => set((state) => ({
+    userProgress: updateUserProgress(state.userProgress, challengeId, correct, timeSpent, conceptsLearned),
+  })),
+  
   reset: () => set(initialState),
-}));
+  
+  clearCurrentChallenge: () => set({
+    challenge: null,
+    prediction: null,
+    executionResult: null,
+    discrepancies: [],
+    mentorQuestions: [],
+    thinkingAnalysis: null,
+    isLocked: true,
+    currentStep: 0,
+    fixedCode: null,
+    fixSubmitted: false,
+    fixValidated: false,
+    // Keep progress (concepts learned, completed challenges)
+  }),
+    }),
+    {
+      name: 'codereforge-storage', // unique name for localStorage key
+      storage: createJSONStorage(() => localStorage),
+      // Only persist progress (completed challenges, concepts learned, gamification)
+      // DO NOT persist current challenge state - users should start fresh each time
+      partialize: (state) => ({
+        conceptsLearned: state.conceptsLearned,
+        completedChallenges: state.completedChallenges,
+        userScore: state.userScore,
+        userProgress: state.userProgress,
+        // Explicitly exclude current challenge state
+      }),
+    }
+  )
+);
 

@@ -34,33 +34,33 @@ export function TraceTable({ trace, isUserTrace = false }: TraceTableProps) {
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b">
-                <th className="p-2 text-left">Step</th>
-                <th className="p-2 text-left">Line</th>
-                <th className="p-2 text-left">Variables</th>
-                <th className="p-2 text-left">Output</th>
-                <th className="p-2 text-left">Explanation</th>
+              <tr className="border-b border-border">
+                <th className="p-2 text-left text-foreground font-semibold">Step</th>
+                <th className="p-2 text-left text-foreground font-semibold">Line</th>
+                <th className="p-2 text-left text-foreground font-semibold">Variables</th>
+                <th className="p-2 text-left text-foreground font-semibold">Output</th>
+                <th className="p-2 text-left text-foreground font-semibold">Explanation</th>
               </tr>
             </thead>
             <tbody>
               {trace.map((step, index) => (
                 <tr
                   key={step.step}
-                  className={`border-b hover:bg-accent cursor-pointer ${
-                    currentStep === step.step ? 'bg-accent' : ''
+                  className={`border-b border-border hover:bg-accent hover:text-accent-foreground cursor-pointer ${
+                    currentStep === step.step ? 'bg-accent text-accent-foreground' : ''
                   }`}
                   onClick={() => setCurrentStep(step.step)}
                 >
-                  <td className="p-2 font-mono">{step.step}</td>
-                  <td className="p-2 font-mono">{step.line}</td>
+                  <td className="p-2 font-mono text-foreground">{step.step}</td>
+                  <td className="p-2 font-mono text-foreground">{step.line}</td>
                   <td className="p-2">
-                    <pre className="text-xs bg-muted p-2 rounded">
+                    <pre className="text-xs bg-muted text-foreground p-2 rounded">
                       {JSON.stringify(step.variables, null, 2)}
                     </pre>
                   </td>
                   <td className="p-2">
                     {step.output.length > 0 ? (
-                      <div className="text-xs font-mono bg-muted p-1 rounded">
+                      <div className="text-xs font-mono bg-muted text-foreground p-1 rounded">
                         {step.output.join(', ')}
                       </div>
                     ) : (
