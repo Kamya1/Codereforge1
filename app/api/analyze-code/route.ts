@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { analyzeCodeStatically } from '@/lib/analysis/static-analyzer';
 
 // API Provider configuration
 type ApiProvider = 'groq' | 'openai';
@@ -171,7 +172,18 @@ CRITICAL RULES:
         };
       }
 
-      return NextResponse.json({ analysis });
+      // Run static analysis
+      const staticAnalysis = analyzeCodeStatically(code, language as 'cpp' | 'javascript' | 'python' | 'typescript');
+
+      return NextResponse.json({ 
+        analysis,
+        staticAnalysis: {
+          passed: staticAnalysis.passed,
+          errors: staticAnalysis.errors,
+          warnings: staticAnalysis.warnings,
+          errorsCount: staticAnalysis.errorsCount,
+        }
+      });
     } catch (error: any) {
       console.error('Error analyzing code with AI:', error);
       // Fallback: basic analysis

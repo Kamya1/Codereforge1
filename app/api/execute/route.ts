@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { executeJavaScript, executeCpp, executePython } from '@/lib/execution/tracer';
-import { findDiscrepancies } from '@/lib/execution/tracer';
+import { executeJavaScript, executeCpp, executePython, findDiscrepancies } from '@/lib/execution/tracer';
 import type { TraceStep } from '@/types';
 
 export async function POST(request: NextRequest) {
@@ -11,6 +10,13 @@ export async function POST(request: NextRequest) {
     if (!code) {
       return NextResponse.json(
         { error: 'Code is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!language) {
+      return NextResponse.json(
+        { error: 'Language is required' },
         { status: 400 }
       );
     }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { ChallengeState, Challenge, Prediction, ExecutionResult, Discrepancy, MentorQuestion, ConceptCard, ThinkingAnalysis } from '@/types';
+import type { ChallengeState, Challenge, Prediction, ExecutionResult, Discrepancy, MentorQuestion, ConceptCard, ThinkingAnalysis, SuggestedFix } from '@/types';
 import type { UserScore } from '@/lib/gamification/points-system';
 import type { UserProgress } from '@/lib/learning/adaptive-engine';
 
@@ -19,6 +19,7 @@ interface ChallengeStore extends ChallengeState {
   addConceptLearned: (concept: ConceptCard) => void;
   setFixSubmitted: (submitted: boolean) => void;
   setFixValidated: (validated: boolean) => void;
+  setSuggestedFix: (suggestedFix: SuggestedFix | null) => void;
   reset: () => void;
   clearCurrentChallenge: () => void;
   // Progress tracking
@@ -53,6 +54,7 @@ const initialState: ChallengeState & {
   conceptsLearned: [],
   fixSubmitted: false,
   fixValidated: false,
+  suggestedFix: null,
   completedChallenges: [],
   userScore: createInitialScore(),
   userProgress: {
@@ -82,6 +84,7 @@ export const useChallengeStore = create<ChallengeStore>()(
     fixedCode: null,
     fixSubmitted: false,
     fixValidated: false,
+    suggestedFix: null,
   }),
   
   setPrediction: (prediction) => set({ prediction }),
@@ -117,6 +120,8 @@ export const useChallengeStore = create<ChallengeStore>()(
   setFixSubmitted: (fixSubmitted) => set({ fixSubmitted }),
   
   setFixValidated: (fixValidated) => set({ fixValidated }),
+  
+  setSuggestedFix: (suggestedFix) => set({ suggestedFix }),
   
   markChallengeComplete: (challengeId: string) => set((state) => {
     if (!state.completedChallenges.includes(challengeId)) {
@@ -166,6 +171,7 @@ export const useChallengeStore = create<ChallengeStore>()(
     fixedCode: null,
     fixSubmitted: false,
     fixValidated: false,
+    suggestedFix: null,
     // Keep progress (concepts learned, completed challenges)
   }),
     }),

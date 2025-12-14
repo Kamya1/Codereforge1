@@ -11,6 +11,8 @@ import { ThinkingAnalysis } from '@/components/visualization/ThinkingAnalysis';
 import { TestCaseResults } from '@/components/visualization/TestCaseResults';
 import { TraceTable } from '@/components/trace/TraceTable';
 import { CodeSubmissionForm } from '@/components/code/CodeSubmissionForm';
+import { SuggestedFixView } from '@/components/fix/SuggestedFixView';
+import { ComplexityView } from '@/components/analysis/ComplexityView';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
@@ -159,6 +161,7 @@ export default function Home() {
     addConceptLearned,
     setFixSubmitted,
     setFixValidated,
+    setSuggestedFix,
     markChallengeComplete,
     clearCurrentChallenge,
   } = useChallengeStore();
@@ -675,6 +678,16 @@ export default function Home() {
                   </Card>
                 )}
 
+                {/* Step 4: Time & Space Complexity */}
+                {executionResult && (
+                  <ComplexityView />
+                )}
+
+                {/* Step 5: Suggest Fix - Show after Step 3 is visible */}
+                {executionResult && challenge.hasBug !== false && (
+                  <SuggestedFixView />
+                )}
+
                 {/* For user-submitted code without bugs, show completion message */}
                 {executionResult && challenge.isUserSubmitted && challenge.hasBug === false && (
                   <Card className="border-green-500 bg-green-50/50 dark:bg-green-900/10">
@@ -684,12 +697,12 @@ export default function Home() {
                         Code Analysis Complete
                       </CardTitle>
                       <CardDescription>
-                        You've successfully traced through your code and understood its logic!
+                        You&apos;ve successfully traced through your code and understood its logic!
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-muted-foreground">
-                        Your code has no bugs. You've completed the trace and understand how it works. Great job!
+                        Your code has no bugs. You&apos;ve completed the trace and understand how it works. Great job!
                       </p>
                     </CardContent>
                   </Card>

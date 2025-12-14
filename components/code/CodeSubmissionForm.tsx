@@ -5,7 +5,7 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Code, Bug, CheckCircle2 } from 'lucide-react';
+import { Loader2, Code, Bug, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useChallengeStore } from '@/store/useChallengeStore';
 import type { Challenge } from '@/types';
 
@@ -25,6 +25,12 @@ export function CodeSubmissionForm() {
     concepts: string[];
     difficulty: 'easy' | 'medium' | 'hard';
     bugDescription?: string;
+  } | null>(null);
+  const [staticAnalysis, setStaticAnalysis] = useState<{
+    passed: boolean;
+    errors: Array<{ line?: number; message: string; severity: string; category: string }>;
+    warnings: number;
+    errorsCount: number;
   } | null>(null);
 
   const addTestCase = () => {
@@ -82,14 +88,24 @@ export function CodeSubmissionForm() {
       }
 
       setAnalysisResult(data.analysis);
+      setStaticAnalysis(data.staticAnalysis || null);
       
-      toast({
-        variant: data.analysis.hasBug ? 'warning' : 'success',
-        title: data.analysis.hasBug ? 'Bug Detected!' : 'No Bugs Found',
-        description: data.analysis.hasBug 
-          ? 'AI found potential issues. You can debug step-by-step.'
-          : 'Code looks good! You can trace through it to understand the logic.',
-      });
+      // Show toast with static analysis info if there are issues
+      if (data.staticAnalysis && !data.staticAnalysis.passed) {
+        toast({
+          variant: 'warning',
+          title: 'Static Analysis Warnings',
+          description: `Found ${data.staticAnalysis.errorsCount} error(s) and ${data.staticAnalysis.warnings} warning(s). Check the analysis results below.`,
+        });
+      } else {
+        toast({
+          variant: data.analysis.hasBug ? 'warning' : 'success',
+          title: data.analysis.hasBug ? 'Bug Detected!' : 'No Bugs Found',
+          description: data.analysis.hasBug 
+            ? 'AI found potential issues. You can debug step-by-step.'
+            : 'Code looks good! You can trace through it to understand the logic.',
+        });
+      }
     } catch (error) {
       console.error('Analysis error:', error);
       toast({
@@ -234,7 +250,7 @@ export function CodeSubmissionForm() {
                       rows={2}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Format: Each line represents one input value. For C++, use cin >> var; to read.
+                      Format: Each line represents one input value. For C++, use cin &gt;&gt; var; to read.
                     </p>
                   </div>
                   <div>
@@ -321,6 +337,38 @@ export function CodeSubmissionForm() {
               <div>
                 <p className="text-sm font-medium mb-1">Difficulty: <span className="capitalize">{analysisResult.difficulty}</span></p>
               </div>
+
+              {/* Static Analysis Warnings */}
+              {staticAnalysis && !staticAnalysis.passed && (
+                <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" />
+                    <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                      Static Analysis: {staticAnalysis.errorsCount} error(s), {staticAnalysis.warnings} warning(s)
+                    </p>
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {staticAnalysis.errors.slice(0, 5).map((error, idx) => (
+                      <div key={idx} className="text-xs text-red-800 dark:text-red-200">
+                        {error.line ? (
+                          <span className="font-mono">Line {error.line}: </span>
+                        ) : null}
+                        <span>{error.message}</span>
+                        {error.severity === 'error' && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-red-200 dark:bg-red-800 rounded text-[10px] font-semibold">
+                            ERROR
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {staticAnalysis.errors.length > 5 && (
+                      <p className="text-xs text-red-600 dark:text-red-400 italic">
+                        ... and {staticAnalysis.errors.length - 5} more issue(s)
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <Button
                 onClick={handleStartDebugging}

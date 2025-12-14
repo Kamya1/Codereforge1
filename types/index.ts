@@ -91,6 +91,48 @@ export interface ConceptCard {
   learned: boolean;
 }
 
+export interface SuggestedFix {
+  correctCode: string;
+  explanation: string;
+  changes: Array<{
+    line: number;
+    original: string;
+    corrected: string;
+    reason: string;
+  }>;
+  keyPoints: string[];
+  aiTests?: TestCase[]; // Tests requested from AI
+  focusedSnippet?: string; // Snippet sent to AI
+  staticFindings?: string[]; // Static analysis findings sent to AI
+  retries?: number; // Number of AI retries attempted
+  validation?: {
+    testsPassed: boolean;
+    testResults?: {
+      totalTests: number;
+      passedTests: number;
+      failedTests: Array<{
+        testCase: TestCase;
+        actualOutput: string;
+        expectedOutput: string;
+        error?: string;
+      }>;
+    };
+    staticAnalysis?: {
+      passed: boolean;
+      errors: Array<{
+        line?: number;
+        message: string;
+        severity: 'error' | 'warning' | 'info';
+        category: 'syntax' | 'logic' | 'style' | 'security';
+      }>;
+      warnings: number;
+      errorsCount: number;
+    };
+    executionSuccess: boolean;
+    executionError?: string;
+  };
+}
+
 export interface ChallengeState {
   challenge: Challenge | null;
   prediction: Prediction | null;
@@ -104,5 +146,6 @@ export interface ChallengeState {
   conceptsLearned: ConceptCard[];
   fixSubmitted: boolean;
   fixValidated: boolean;
+  suggestedFix: SuggestedFix | null;
 }
 
