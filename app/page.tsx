@@ -162,6 +162,9 @@ export default function Home() {
     setFixSubmitted,
     setFixValidated,
     setSuggestedFix,
+    hintCount,
+    incrementHintCount,
+    resetHintCount,
     markChallengeComplete,
     clearCurrentChallenge,
   } = useChallengeStore();
@@ -294,6 +297,8 @@ export default function Home() {
         setFixValidated(validation.isValid);
 
         if (validation.isValid) {
+          // Reset hint count on successful fix
+          resetHintCount();
           // Mark challenge as complete
           markChallengeComplete(challenge.id);
           
@@ -313,13 +318,45 @@ export default function Home() {
             description: validation.explanation,
           });
         } else {
-          const suggestionsText = validation.suggestions && validation.suggestions.length > 0
-            ? `\n\nSuggestions:\n${validation.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`
-            : '';
+          // Increment hint count for wrong submission
+          incrementHintCount();
+          const newHintCount = hintCount + 1;
+          
+          // Build progressive hints
+          let hintText = '';
+          if (newHintCount === 1) {
+            // First hint
+            if (validation.suggestions && validation.suggestions.length > 0) {
+              hintText = `\n\n💡 Hint 1: ${validation.suggestions[0]}`;
+            } else {
+              hintText = '\n\n💡 Hint 1: Review the code logic and check for common errors like off-by-one mistakes or incorrect conditions.';
+            }
+          } else if (newHintCount === 2) {
+            // Second hint
+            if (validation.suggestions && validation.suggestions.length > 1) {
+              hintText = `\n\n💡 Hint 1: ${validation.suggestions[0]}\n💡 Hint 2: ${validation.suggestions[1]}`;
+            } else if (validation.suggestions && validation.suggestions.length > 0) {
+              hintText = `\n\n💡 Hint 1: ${validation.suggestions[0]}\n💡 Hint 2: Compare your output with the expected output. Check variable assignments and loop conditions.`;
+            } else {
+              hintText = '\n\n💡 Hint 1: Review the code logic and check for common errors.\n💡 Hint 2: Compare your output with the expected output. Check variable assignments and loop conditions.';
+            }
+          } else if (newHintCount >= 3) {
+            // Third hint - show all hints
+            if (validation.suggestions && validation.suggestions.length > 2) {
+              hintText = `\n\n💡 Hint 1: ${validation.suggestions[0]}\n💡 Hint 2: ${validation.suggestions[1]}\n💡 Hint 3: ${validation.suggestions[2]}\n\nStep 5 (Suggest Fix) is now available below for detailed guidance.`;
+            } else if (validation.suggestions && validation.suggestions.length > 1) {
+              hintText = `\n\n💡 Hint 1: ${validation.suggestions[0]}\n💡 Hint 2: ${validation.suggestions[1]}\n💡 Hint 3: Check Step 5 below for the complete solution and explanation.\n\nStep 5 (Suggest Fix) is now available below.`;
+            } else if (validation.suggestions && validation.suggestions.length > 0) {
+              hintText = `\n\n💡 Hint 1: ${validation.suggestions[0]}\n💡 Hint 2: Review the execution trace and compare with expected behavior.\n💡 Hint 3: Check Step 5 below for the complete solution.\n\nStep 5 (Suggest Fix) is now available below.`;
+            } else {
+              hintText = '\n\n💡 Hint 1: Review the code logic and check for common errors.\n💡 Hint 2: Compare your output with the expected output.\n💡 Hint 3: Check Step 5 below for the complete solution.\n\nStep 5 (Suggest Fix) is now available below.';
+            }
+          }
+          
           toast({
             variant: 'warning',
-            title: 'Fix Needs Improvement',
-            description: `${validation.explanation}${suggestionsText}`,
+            title: `Fix Needs Improvement (Attempt ${newHintCount})`,
+            description: `${validation.explanation}${hintText}`,
           });
         }
       } catch (validationError) {
@@ -330,6 +367,7 @@ export default function Home() {
         setFixValidated(basicValid);
         
         if (basicValid) {
+          resetHintCount();
           markChallengeComplete(challenge.id);
           challenge.concepts.forEach((concept) => {
             addConceptLearned({
@@ -344,10 +382,20 @@ export default function Home() {
             description: 'AI validation unavailable, using basic validation',
           });
         } else {
+          incrementHintCount();
+          const newHintCount = hintCount + 1;
+          let hintText = '';
+          if (newHintCount === 1) {
+            hintText = '\n\n💡 Hint 1: Review the code logic and check for common errors.';
+          } else if (newHintCount === 2) {
+            hintText = '\n\n💡 Hint 1: Review the code logic and check for common errors.\n💡 Hint 2: Compare your output with the expected output.';
+          } else if (newHintCount >= 3) {
+            hintText = '\n\n💡 Hint 1: Review the code logic and check for common errors.\n💡 Hint 2: Compare your output with the expected output.\n💡 Hint 3: Check Step 5 below for the complete solution.\n\nStep 5 (Suggest Fix) is now available below.';
+          }
           toast({
             variant: 'warning',
-            title: 'AI Validation Unavailable',
-            description: 'Please ensure your API key is configured for AI-powered validation.',
+            title: `Fix Needs Improvement (Attempt ${newHintCount})`,
+            description: `Please ensure your API key is configured for AI-powered validation.${hintText}`,
           });
         }
       }
@@ -632,15 +680,20 @@ export default function Home() {
                   </CardContent>
                 </Card>
 
-                {/* Step 3: Fix the Forge - Only show after Step 2 is complete and if bug exists */}
+                {/* Step 3: Time & Space Complexity - Show before Step 4 */}
+                {executionResult && (
+                  <ComplexityView />
+                )}
+
+                {/* Step 4: Fix the Forge - Only show after Step 2 is complete and if bug exists */}
                 {executionResult && challenge.hasBug !== false && (
                   <Card className="border-primary">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
                         <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground font-bold">
-                          3
+                          4
                         </span>
-                        Step 3: Fix the Forge
+                        Step 4: Fix the Forge
                       </CardTitle>
                       <CardDescription>
                         {challenge.isUserSubmitted && challenge.bugDescription
@@ -670,21 +723,42 @@ export default function Home() {
                         </p>
                       )}
                       {fixSubmitted && !fixValidated && (
-                        <p className="text-xs text-yellow-600 text-center">
-                          ⚠ Fix submitted but may not be correct. Review and try again.
-                        </p>
+                        <div className="space-y-2">
+                          <p className="text-xs text-yellow-600 text-center">
+                            ⚠ Fix submitted but may not be correct. Review and try again.
+                          </p>
+                          {hintCount > 0 && (
+                            <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800">
+                              <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-200 mb-2">
+                                💡 Hints ({hintCount}/3):
+                              </p>
+                              <div className="space-y-1">
+                                {hintCount >= 1 && (
+                                  <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                                    <strong>Hint 1:</strong> Review the code logic and check for common errors like off-by-one mistakes or incorrect conditions.
+                                  </p>
+                                )}
+                                {hintCount >= 2 && (
+                                  <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                                    <strong>Hint 2:</strong> Compare your output with the expected output. Check variable assignments and loop conditions.
+                                  </p>
+                                )}
+                                {hintCount >= 3 && (
+                                  <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                                    <strong>Hint 3:</strong> Check Step 5 below for detailed guidance and the complete solution.
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Step 4: Time & Space Complexity */}
-                {executionResult && (
-                  <ComplexityView />
-                )}
-
-                {/* Step 5: Suggest Fix - Show after Step 3 is visible */}
-                {executionResult && challenge.hasBug !== false && (
+                {/* Step 5: Suggest Fix - Show only after 3 wrong submissions (hints) */}
+                {executionResult && challenge.hasBug !== false && hintCount >= 3 && (
                   <SuggestedFixView />
                 )}
 

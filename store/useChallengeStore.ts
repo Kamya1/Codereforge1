@@ -20,6 +20,9 @@ interface ChallengeStore extends ChallengeState {
   setFixSubmitted: (submitted: boolean) => void;
   setFixValidated: (validated: boolean) => void;
   setSuggestedFix: (suggestedFix: SuggestedFix | null) => void;
+  hintCount: number;
+  incrementHintCount: () => void;
+  resetHintCount: () => void;
   reset: () => void;
   clearCurrentChallenge: () => void;
   // Progress tracking
@@ -55,6 +58,7 @@ const initialState: ChallengeState & {
   fixSubmitted: false,
   fixValidated: false,
   suggestedFix: null,
+  hintCount: 0,
   completedChallenges: [],
   userScore: createInitialScore(),
   userProgress: {
@@ -85,6 +89,7 @@ export const useChallengeStore = create<ChallengeStore>()(
     fixSubmitted: false,
     fixValidated: false,
     suggestedFix: null,
+    hintCount: 0,
   }),
   
   setPrediction: (prediction) => set({ prediction }),
@@ -122,6 +127,10 @@ export const useChallengeStore = create<ChallengeStore>()(
   setFixValidated: (fixValidated) => set({ fixValidated }),
   
   setSuggestedFix: (suggestedFix) => set({ suggestedFix }),
+  
+  incrementHintCount: () => set((state) => ({ hintCount: Math.min(state.hintCount + 1, 3) })),
+  
+  resetHintCount: () => set({ hintCount: 0 }),
   
   markChallengeComplete: (challengeId: string) => set((state) => {
     if (!state.completedChallenges.includes(challengeId)) {
@@ -172,6 +181,7 @@ export const useChallengeStore = create<ChallengeStore>()(
     fixSubmitted: false,
     fixValidated: false,
     suggestedFix: null,
+    hintCount: 0,
     // Keep progress (concepts learned, completed challenges)
   }),
     }),

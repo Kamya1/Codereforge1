@@ -147,5 +147,6 @@ export interface ChallengeState {
   fixSubmitted: boolean;
   fixValidated: boolean;
   suggestedFix: SuggestedFix | null;
+  hintCount: number;
 }
 

@@ -50,8 +50,42 @@ async function callAI(messages: Array<{ role: string; content: string }>, config
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API error: ${response.status} - ${error}`);
+    const errorText = await response.text();
+    // Try to extract JSON from error response (sometimes API returns JSON in error)
+    try {
+      const errorJson = JSON.parse(errorText);
+      
+      // Check for failed_generation field (OpenAI/Groq sometimes puts the JSON here)
+      if (errorJson.error?.failed_generation) {
+        try {
+          // The failed_generation is a JSON string, so parse it
+          const failedGen = JSON.parse(errorJson.error.failed_generation);
+          // Return it as a string so it can be parsed again in the main function
+          return JSON.stringify(failedGen);
+        } catch (parseErr) {
+          // If parsing fails, try to extract JSON from the string
+          const jsonMatch = errorJson.error.failed_generation.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return jsonMatch[0];
+          }
+        }
+      }
+      
+      // If error contains a message with JSON, try to extract it
+      if (errorJson.error?.message) {
+        const jsonInError = errorJson.error.message.match(/\{[\s\S]*"correctCode"[\s\S]*\}/);
+        if (jsonInError) {
+          return jsonInError[0];
+        }
+      }
+    } catch (e) {
+      // If error text contains JSON directly, try to extract it
+      const jsonInError = errorText.match(/\{[\s\S]*"correctCode"[\s\S]*\}/);
+      if (jsonInError) {
+        return jsonInError[0];
+      }
+    }
+    throw new Error(`API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
@@ -216,10 +250,67 @@ CRITICAL RULES:
     // Parse JSON response
     let suggestedFix: SuggestedFix;
     try {
-      // Extract JSON from markdown code blocks if present
-      const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/) || response.match(/\{[\s\S]*\}/);
-      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : response;
-      const parsed = JSON.parse(jsonStr);
+      // Try to extract JSON from the response
+      // First, try to find JSON in markdown code blocks
+      let jsonStr = response;
+      const jsonBlockMatch = response.match(/```json\n([\s\S]*?)\n```/);
+      if (jsonBlockMatch) {
+        jsonStr = jsonBlockMatch[1];
+      } else {
+        // Try to find JSON object in the response
+        const jsonObjectMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonObjectMatch) {
+          jsonStr = jsonObjectMatch[0];
+        }
+      }
+      
+      // Clean up the JSON string - remove any error messages before/after JSON
+      // Sometimes the API returns error messages with JSON embedded
+      const jsonStart = jsonStr.indexOf('{');
+      const jsonEnd = jsonStr.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+        jsonStr = jsonStr.substring(jsonStart, jsonEnd + 1);
+      }
+      
+      // Handle escaped JSON strings (from failed_generation field)
+      let parsed;
+      try {
+        // First try direct parsing
+        parsed = JSON.parse(jsonStr);
+        // If the result is a string that looks like JSON, parse it again (double-encoded)
+        if (typeof parsed === 'string' && parsed.trim().startsWith('{')) {
+          parsed = JSON.parse(parsed);
+        }
+      } catch (e) {
+        // If direct parsing fails, try unescaping common escape sequences
+        // This handles cases where JSON is escaped in the error response
+        try {
+          // Replace escaped unicode and common escape sequences
+          const unescaped = jsonStr
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"')
+            .replace(/\\'/g, "'")
+            .replace(/\\t/g, '\t')
+            .replace(/\\r/g, '\r')
+            .replace(/\\\\/g, '\\')
+            .replace(/\\u003c/g, '<')
+            .replace(/\\u003e/g, '>')
+            .replace(/\\u0026/g, '&');
+          parsed = JSON.parse(unescaped);
+        } catch (e2) {
+          // If that also fails, try to extract just the JSON object
+          const jsonMatch = jsonStr.match(/\{[\s\S]*"correctCode"[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              parsed = JSON.parse(jsonMatch[0]);
+            } catch (e3) {
+              throw new Error('Failed to parse JSON response after multiple attempts');
+            }
+          } else {
+            throw new Error('Failed to parse JSON response');
+          }
+        }
+      }
       
       const correctCode = parsed.correctCode || originalCode;
       
@@ -327,15 +418,39 @@ CRITICAL RULES:
         keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
         validation,
       };
-    } catch (parseError) {
-      // If JSON parsing fails, create a structured response
+    } catch (parseError: any) {
+      // If JSON parsing fails, try to extract JSON from error message or response
       console.error('Failed to parse AI response:', parseError);
-      suggestedFix = {
-        correctCode: originalCode,
-        explanation: 'AI analysis completed but response format was invalid. Please try again.',
-        changes: [],
-        keyPoints: ['The AI response could not be parsed. Please try again.'],
-      };
+      
+      // Sometimes the error message contains the JSON
+      let extractedJson = null;
+      try {
+        // Try to find JSON in the response string
+        const jsonMatch = response.match(/\{[\s\S]*"correctCode"[\s\S]*\}/);
+        if (jsonMatch) {
+          extractedJson = JSON.parse(jsonMatch[0]);
+        }
+      } catch (e) {
+        // Ignore extraction errors
+      }
+      
+      if (extractedJson) {
+        // Use extracted JSON if found
+        suggestedFix = {
+          correctCode: extractedJson.correctCode || originalCode,
+          explanation: extractedJson.explanation || 'Fix suggestion generated',
+          changes: Array.isArray(extractedJson.changes) ? extractedJson.changes : [],
+          keyPoints: Array.isArray(extractedJson.keyPoints) ? extractedJson.keyPoints : [],
+        };
+      } else {
+        // Fallback: create a structured response
+        suggestedFix = {
+          correctCode: originalCode,
+          explanation: 'AI analysis completed but response format was invalid. The response may contain valid JSON that needs to be extracted. Please try again.',
+          changes: [],
+          keyPoints: ['The AI response could not be parsed. Please try again or check your API configuration.'],
+        };
+      }
     }
 
     return suggestedFix;

@@ -1,0 +1,12 @@
+The API error response contains a `failed_generation` field with the actual JSON. Need to:
+
+1. In `callAI` function, when response is not ok:
+   - Parse the error JSON
+   - Extract `error.failed_generation` field
+   - Parse that escaped JSON string
+   - Return it
+
+2. In the JSON parsing section:
+   - Handle escaped JSON strings (with \n, \u003c, etc.)
+   - Unescape before parsing
+
